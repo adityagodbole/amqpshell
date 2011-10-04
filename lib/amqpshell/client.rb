@@ -61,7 +61,7 @@ module AmqpShell
           @run_lock.unlock
           send_sig('kill')
           $Logger.info "Sent kill"
-          @state = 'finished'
+          @state = 'timeout'
           @retcode = -1
           blk.call(self) if blk_given
           self.destroy
