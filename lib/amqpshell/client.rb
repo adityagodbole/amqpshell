@@ -59,7 +59,7 @@ module AmqpShell
         EM.add_timer(timeout) do
           next if !@run_lock.locked?
           @run_lock.unlock
-          send_sig('kill')
+          kill
           $Logger.info "Sent kill"
           @state = 'timeout'
           @retcode = -1
@@ -68,6 +68,13 @@ module AmqpShell
         end 
       end
       self
+    end
+
+    def kill
+      j1 = @manager.create_job(@destkey)
+      j1.run_job({:type => 'kill', :args => "#{@jobid}"}) do
+        :done
+      end
     end
 
     def send_sig(signal)
