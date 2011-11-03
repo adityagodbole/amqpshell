@@ -17,6 +17,7 @@ module AmqpShell
       @stdout = @outqueue = QueueIO.new(outqueue,'w',@nodeid,@jobid)
       @stderr = @errqueue = QueueIO.new(errqueue,'w',@nodeid,@jobid)
       @status = 'init'
+      @jobthread = nil
     end
 
 
@@ -33,17 +34,34 @@ module AmqpShell
       end
       ret = ""
       @status = 'started'
-      ret = block.call(self, args, fsdir)
-      @status = 'finished'
-      ret ||= ""
-      fsout = "nil"
-      if !fs.empty?
-        zip_dir(fsdir,outfs)
-        fsout = File.open(outfs).read
-        FileUtils.rm_rf(zipdir)
+      begin
+        @jobthread = Thread.new { block.call(self, args, fsdir) }
+        ret = @jobthread.join
+      ensure
+        @status = 'finished'
+        ret ||= ""
+        fsout = "nil"
+        if !fs.empty?
+          begin
+            zip_dir(fsdir,outfs)
+            fsout = File.open(outfs).read
+            FileUtils.rm_rf(zipdir)
+          rescue
+            nil
+          end
+        end
+        FileUtils.rm_rf(fsdir)
       end
-      FileUtils.rm_rf(fsdir)
       {'return' => ret.to_s, 'fs' => fsout}
+    end
+
+    def on_kill(&blk)
+      @on_kill = blk
+    end
+
+    def kill!
+      @on_kill.call
+      @jobthread.kill
     end
 
     def on_sig(&blk)
@@ -76,6 +94,14 @@ module AmqpShell
           jobs = @jobs.select{|j| argv.index(j['id'])}
         end
         j.stdout.send(jobs.map{|j| j['id'] + ":" + j['job'].status}.join("\n"))
+        0
+      }
+      register_job_handler('kill') { |j, args, dir|
+        argv = args.split
+        jobid = argv[0]
+        job = @jobs.find {|job| job['id'] == jobid}
+        $Logger.info "Sending signal #{sig} to #{jobid}"
+        job.kill! if job
         0
       }
       register_job_handler('sig') { |j, args, dir| 
